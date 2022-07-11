@@ -15,7 +15,11 @@ def tle_file_naming(sat_name, cat_id):
 
     today = date.today()
     data_pulled_day = today.strftime("%y%m%d")
-    output_file_name = os.path.join(os.getcwd(), "output", f"{data_pulled_day}_{sat_name}_{cat_id}.tle")
+    path = os.path.join(os.getcwd(), "output")
+    if not os.path.exists(path):
+        os.mkdir(path)
+
+    output_file_name = os.path.join(path, f"{data_pulled_day}_{sat_name}_{cat_id}.tle")
     return output_file_name
 
 def check_tle(cat_id= None, sat_name = None):
@@ -32,9 +36,7 @@ def check_tle(cat_id= None, sat_name = None):
     elif sat_name: 
         request_string = f"http://celestrak.org/NORAD/elements/gp.php?NAME={sat_name}&FORMAT=TLE"
         
-
     f = requests.get(request_string)
-    
     string_format = codecs.decode(f.content, 'UTF-8')
     
      # %% Determine sat name for output file

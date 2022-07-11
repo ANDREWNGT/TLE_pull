@@ -4,5 +4,10 @@
 import TLE_pull 
 
 if __name__ == '__main__':
-    TLE_pull.check_tle(cat_id = 25544)
-    TLE_pull.check_tle(sat_name = "TELEOS 1")
+    # Example to use NORAD Cat ID: 
+    # TLE_pull.check_tle(cat_id = 25544)
+
+    # Example to use satellite exact name. Note that name must match CelesTrak's exact format. 
+    # TLE_pull.check_tle(sat_name = "STARLINK-1007")
+
+    TLE_pull.check_tle(cat_id = 25544) # Pulls data of the ISS. User is recommended to edit the input parameter of this line. 
