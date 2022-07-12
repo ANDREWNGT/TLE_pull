@@ -3,7 +3,7 @@ import os
 import codecs
 from datetime import date
 
-def tle_file_naming(sat_name, cat_id):
+def tle_file_naming(sat_name, cat_id, output_folder):
     '''
     Purpose: Names tle file with date that data is pulled from server in format "YYMMDD_{cat_no}_{satellite name}.tle"
 
@@ -15,14 +15,17 @@ def tle_file_naming(sat_name, cat_id):
 
     today = date.today()
     data_pulled_day = today.strftime("%y%m%d")
-    path = os.path.join(os.getcwd(), "output")
-    if not os.path.exists(path):
-        os.mkdir(path)
+    if output_folder is None:
+        path = os.path.join(os.getcwd(), "output")
+        if not os.path.exists(path):
+            os.mkdir(path)
+    else: 
+        path = output_folder
 
     output_file_name = os.path.join(path, f"{data_pulled_day}_{sat_name}_{cat_id}.tle")
     return output_file_name
 
-def check_tle(cat_id= None, sat_name = None):
+def check_tle(cat_id= None, sat_name = None, output_folder = None):
     '''
     Purpose: Pull latest tle from server at time of execution and save it to local machine using NORAD category number
 
@@ -48,7 +51,7 @@ def check_tle(cat_id= None, sat_name = None):
         cat_id = string_format.split("\n")[1].split(" ")[1][0:5]
 
     # %% Determine output file name
-    output_file_name = tle_file_naming(sat_name, cat_id)
+    output_file_name = tle_file_naming(sat_name, cat_id, output_folder)
     print(output_file_name)
 
     # %% Save data to file
