@@ -57,3 +57,4 @@ def check_tle(cat_id= None, sat_name = None, output_folder = None):
     # %% Save data to file
     with open(output_file_name, 'wb') as file: 
         file.write(f._content)
+    return output_file_name
