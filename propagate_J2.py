@@ -10,6 +10,7 @@ import numpy as np
 from astropy.time import Time
 import pandas as pd
 
+import matplotlib.pyplot as plt
 global earth_rotation_rate 
 earth_rotation_rate = 7.2921150E-5 # rad/s
 def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 1, time_step = 5):
@@ -31,8 +32,9 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 1, time_step = 
     # TLE_pull.check_tle(cat_id = 25544)
     if use_today_date:
         
+        date_format_today = "%Y%m%d"
         today = date.today()
-        data_pulled_day = today.strftime(date_format)
+        data_pulled_day = today.strftime(date_format_today)
         
         # Example to use satellite exact name. Note that name must match CelesTrak's exact format. 
         # TLE_pull.check_tle(sat_name = "STARLINK-1007")
@@ -116,7 +118,9 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 1, time_step = 
     overall_df['final_RAAN_T2'] = final_RAAN_T2
     overall_df['inc_degrees'] = inc_degrees
     overall_df['angle_between_vernal_and_pm'] = angle_between_vernal_and_pm
-       
+
+    #plt.plot(angle_between_vernal_and_pm)
+    #plt.show()
     return overall_df
 
 def output_launch_times(overall_df, launch_site_coords, RAAN_tol):
@@ -173,34 +177,44 @@ def output_GHAVE_0(epochs, coord):
 
 def output_angle_between_vernal_and_pm(time):
     '''
-    
+    This angle is formally refered to as Greenwich sidereal angle (GST), the angle between the prime meridian and the vernal equinox.
+    We proceed by:
+    1. Obtaining the Greenwich Apparent Sidereal Time (GAST), which is the greenwich mean sidereal time 
+        corrected for shift in position of vernal equinox due to nutation. Do this using astropy.
+    2. Convert GAST to GST with the conversion: GST = GAST * 15 deg/hour
+    Source: https://lweb.cfa.harvard.edu/~jzhao/times.html#:~:text=Greenwich%20Mean%20Sidereal%20Time%20(GMST,the%20equinox%20due%20to%20nutation.
 
     time: example--> '2018-03-14 23:48:00'
 
     outputs the angle between vernal equinox and the prime meridian, by getting angle between a vector in icrs (eci) vs itrs (ecef) frame
     Need to convert from ECI to ECEF
+
+
     '''
     from astropy import coordinates as coord
     from astropy import units as u
     from astropy.time import Time
 
-    now = Time(time)
-    # position of satellite in GCRS or J20000 ECI:
-    xyz=[-6340.40130292,3070.61774516,684.52263588]
+    # now = Time(time)
+    # # position of an arbitary satellite in GCRS or J20000 ECI:
+    # xyz=[-6340.40130292,3070.61774516,684.52263588]
 
-
-
-    cartrep = coord.CartesianRepresentation(*xyz, unit=u.km)
-    icrs = coord.GCRS(cartrep, representation_type="cartesian", obstime =now)
-    #ITRS IS A ECEF FRAME
-    itrs = icrs.transform_to(coord.ITRS(obstime = now))
-    loc= coord.EarthLocation(*itrs.cartesian.xyz)
+    # cartrep = coord.CartesianRepresentation(*xyz, unit=u.km)
+    # icrs = coord.GCRS(cartrep, representation_type="cartesian", obstime =now)
+    # #ITRS IS A ECEF FRAME
+    # itrs = icrs.transform_to(coord.ITRS(obstime = now))
+    # loc= coord.EarthLocation(*itrs.cartesian.xyz)
     
-    #print(loc)
-    loc_eci = np.array(xyz)
-    loc_ecef = np.array([loc.value[0], loc.value[1], loc.value[2]])
-    rotation_angle = np.arccos(np.dot(loc_eci, loc_ecef)/(np.linalg.norm(loc_eci, ord = 2) * np.linalg.norm(loc_ecef, ord = 2)))* 180/np.pi
+    # #print(loc)
+    # loc_eci = np.array(xyz)
+    # loc_ecef = np.array([loc.value[0], loc.value[1], loc.value[2]])
+    # rotation_angle = np.arccos(np.dot(loc_eci, loc_ecef)/(np.linalg.norm(loc_eci, ord = 2) * np.linalg.norm(loc_ecef, ord = 2)))* 180/np.pi
     #print(rotation_angle)
+
+    t = Time(time, scale='utc')
+    GAST = t.sidereal_time('apparent', 'greenwich')  
+    rotation_angle = GAST.value*15
+
     return rotation_angle
     
 
@@ -216,3 +230,4 @@ if __name__=="__main__":
     launch_azimuth = 102 #degree
     launch_data = output_launch_times(overall_df, launch_site_coords, RAAN_tol)
     valid_launch_times = launch_data["T_prop_T2"]
+    print(valid_launch_times)
