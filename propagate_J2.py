@@ -13,7 +13,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 global earth_rotation_rate 
 earth_rotation_rate = 7.2921150E-5 # rad/s
-def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 1, time_step = 5):
+def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 10, time_step = 10):
     # %% User inputs
     '''
     data_propagate_J2_list:  a list of strings, specifying the requested day to display the RAAN for. 
@@ -107,14 +107,14 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 1, time_step = 
             final_RAAN_NS[propagation_duration[0]] = (current_RAAN + nodal_precession_rate*(propagation_duration[1].total_seconds()))%360
             angle_between_vernal_and_pm[propagation_duration[0]] = output_angle_between_vernal_and_pm(T_prop[propagation_duration[0]].strftime('%Y-%m-%d %H:%M:%S'))
     
-            print(f"RAAN of cat id {cat_id} is {final_RAAN_NS[propagation_duration[0]]:.5f} deg on {T_prop[propagation_duration[0]].strftime('%d/%m/%Y, %H:%M')} UTC, {propagation_duration[1].days} days from today.")
+            #print(f"RAAN of cat id {cat_id} is {final_RAAN_NS[propagation_duration[0]]:.5f} deg on {T_prop[propagation_duration[0]].strftime('%d/%m/%Y, %H:%M')} UTC, {propagation_duration[1].days} days from today.")
 
 
         final_RAAN_T2, T_prop_T2 = RAAN_T2(final_RAAN_NS, T_prop)
         inc_degrees = current_i*180/np.pi
         print(f"Inclination of orbit is: {inc_degrees}")
 
-    overall_df['T_prop_T2'] = T_prop_T2
+    overall_df['T_prop_T2 (UTC)'] = T_prop_T2
     overall_df['final_RAAN_T2'] = final_RAAN_T2
     overall_df['inc_degrees'] = inc_degrees
     overall_df['angle_between_vernal_and_pm'] = angle_between_vernal_and_pm
@@ -127,19 +127,20 @@ def output_launch_times(overall_df, launch_site_coords, RAAN_tol):
     '''
     angle_between_vernal_and_pm tabulates the difference between vernal and prime meridian and each propagated time.
     '''
-    midnight_epochs =np.zeros(overall_df["T_prop_T2"].shape).astype(datetime)
-    for j in enumerate(overall_df["T_prop_T2"]):
+    midnight_epochs =np.zeros(overall_df["T_prop_T2 (UTC)"].shape).astype(datetime)
+    for j in enumerate(overall_df["T_prop_T2 (UTC)"]):
         midnight_epochs[j[0]] = datetime(j[1].year, j[1].month, j[1].day, 0, 0, 0, 0)
 
-    GHAVE_0 = output_GHAVE_0(midnight_epochs, launch_site_coords) * 15 # Conversion of 15deg/hr angle
-    LAN = output_LAN(overall_df["inc_degrees"], launch_site_coords, overall_df["angle_between_vernal_and_pm"])
+    #GHAVE_0 = output_GHAVE_0(midnight_epochs, launch_site_coords) * 15 # Conversion of 15deg/hr angle
+    long_ECI = output_long_ECI(overall_df["inc_degrees"], launch_site_coords, overall_df["angle_between_vernal_and_pm"])
     ### TEST 
-    #Only if final_RAAN_T2 and LAN matches up, then the T_prop_T2 value is valid. 
-    overall_df["del_RAAN"] = np.abs(overall_df["final_RAAN_T2"] - LAN)
+    #Only if final_RAAN_T2 and long_ECI matches up, then the T_prop_T2 value is valid. 
+    overall_df["long_ECI"] = long_ECI
+    overall_df["del_RAAN"] = overall_df["final_RAAN_T2"] - long_ECI
 
-    valid_launch_conditions = overall_df[overall_df["del_RAAN"]< RAAN_tol]
+    valid_launch_conditions = overall_df[(overall_df["del_RAAN"]< RAAN_tol) & (overall_df["del_RAAN"]>=0)]
 
-    #t = np.mod(overall_df["final_RAAN_T2"] - GHAVE_0 - LAN, 360)/(earth_rotation_rate * 180 / np.pi)# t represent GMT time of particular date for launch. 
+    #t = np.mod(overall_df["final_RAAN_T2"] - GHAVE_0 - long_ECI, 360)/(earth_rotation_rate * 180 / np.pi)# t represent GMT time of particular date for launch. 
     # t refers to time in seconds, in GMT of the particular date that allows this. 
     return valid_launch_conditions
 
@@ -148,32 +149,33 @@ def RAAN_T2(RAAN_NS, T_prop):
     altered_timesteps = T_prop - timedelta(minutes = 19)
     return RAAN_T2, altered_timesteps
 
-def output_LAN(i, launch_site_coords, angle_between_vernal_and_pm):
+def output_long_ECI(i, launch_site_coords, angle_between_vernal_and_pm):
     # https://space.stackexchange.com/questions/21796/relation-between-launch-window-and-raan-and-argument-of-perigee
     # Outputs an array. Cannot assume that 0 degree meridian aligns with vernal point
-    # LAN varies with time and date. 
-    # Then LAN of launch site is given as: 
-    LAN = np.zeros(angle_between_vernal_and_pm.shape)
-    LAN = np.mod(angle_between_vernal_and_pm + launch_site_coords[1] - (np.arcsin(np.tan((90-i)*np.pi/180) * np.tan(launch_site_coords[0])*np.pi/180)*180/np.pi), 360)
+    # Longitude of launch site is in ECEF while RAAN is ECI. 
+    # This function transforms the launch site longitude into its ECI counterpart which varies with time of day. 
+    # Longitude of launch site in ECI frame is given as: 
+    long_ECI = np.zeros(angle_between_vernal_and_pm.shape)
+    long_ECI = np.mod(-angle_between_vernal_and_pm + launch_site_coords[1] - (np.arcsin(np.tan((90-i)*np.pi/180) * np.tan(launch_site_coords[0])*np.pi/180)*180/np.pi), 360)
     
-    return LAN 
+    return long_ECI 
 
 
-def output_GHAVE_0(epochs, coord):
-    '''
-    Params
-        epochs: Datetime array containing all GMT midnight epochs
-        coord: tuple containing local coordinates
+# def output_GHAVE_0(epochs, coord):
+#     '''
+#     Params
+#         epochs: Datetime array containing all GMT midnight epochs
+#         coord: tuple containing local coordinates
 
-    returns 
-        GHAVE_0_array: numpy array of floats representing hourangles
-    '''
-    #t= np.zeros(epochs.shape).astype(datetime)
-    GHAVE_0_array = np.zeros(epochs.shape)
-    for epoch in enumerate(epochs):
-        t = Time(epoch[1], scale='utc', location=coord)
-        GHAVE_0_array[epoch[0]] = t.sidereal_time('apparent', 'greenwich').hourangle
-    return GHAVE_0_array
+#     returns 
+#         GHAVE_0_array: numpy array of floats representing hourangles
+#     '''
+#     #t= np.zeros(epochs.shape).astype(datetime)
+#     GHAVE_0_array = np.zeros(epochs.shape)
+#     for epoch in enumerate(epochs):
+#         t = Time(epoch[1], scale='utc', location=coord)
+#         GHAVE_0_array[epoch[0]] = t.sidereal_time('apparent', 'greenwich').hourangle
+#     return GHAVE_0_array
 
 def output_angle_between_vernal_and_pm(time):
     '''
@@ -195,22 +197,6 @@ def output_angle_between_vernal_and_pm(time):
     from astropy import units as u
     from astropy.time import Time
 
-    # now = Time(time)
-    # # position of an arbitary satellite in GCRS or J20000 ECI:
-    # xyz=[-6340.40130292,3070.61774516,684.52263588]
-
-    # cartrep = coord.CartesianRepresentation(*xyz, unit=u.km)
-    # icrs = coord.GCRS(cartrep, representation_type="cartesian", obstime =now)
-    # #ITRS IS A ECEF FRAME
-    # itrs = icrs.transform_to(coord.ITRS(obstime = now))
-    # loc= coord.EarthLocation(*itrs.cartesian.xyz)
-    
-    # #print(loc)
-    # loc_eci = np.array(xyz)
-    # loc_ecef = np.array([loc.value[0], loc.value[1], loc.value[2]])
-    # rotation_angle = np.arccos(np.dot(loc_eci, loc_ecef)/(np.linalg.norm(loc_eci, ord = 2) * np.linalg.norm(loc_ecef, ord = 2)))* 180/np.pi
-    #print(rotation_angle)
-
     t = Time(time, scale='utc')
     GAST = t.sidereal_time('apparent', 'greenwich')  
     rotation_angle = GAST.value*15
@@ -229,5 +215,5 @@ if __name__=="__main__":
     launch_site_coords = (13.73204, 80.23621)
     launch_azimuth = 102 #degree
     launch_data = output_launch_times(overall_df, launch_site_coords, RAAN_tol)
-    valid_launch_times = launch_data["T_prop_T2"]
-    print(valid_launch_times)
+    overall_df.to_csv("output_data.csv")
+    launch_data.to_csv("valid_launch_times.csv", index = False)
