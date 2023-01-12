@@ -1,6 +1,6 @@
 import math
-
-
+import matplotlib.pyplot as plt
+import matplotlib
 def calc_J2_rate(a, i, e):
     # J2 effect constants
     mu = 398600.44189 #km^3/s^2
@@ -11,9 +11,13 @@ def calc_J2_rate(a, i, e):
     perturbed_mean_motion = mean_motion * (1 + 3/4*J2_const * (Re/a)**2 * (1- e**2)**(-3/2)* (3*math.cos(i)**2-1))
     nodal_precession_rate = -3/2 * J2_const * (Re/(a*(1-e**2)))**2 * perturbed_mean_motion * math.cos(i) * 180 / math.pi# deg/s
     return nodal_precession_rate
+    
 if __name__=="__main__":
+    matplotlib.use('Qt4Agg')
     Re = 6378
     nominal_alt = 585
+    alt_offsets=[]
+    times_to_complete_raan=[]
     for alt_offset in range(1, 50, 5):
         #alt_offset = 20 #km below
         list_a=[nominal_alt + Re, nominal_alt + Re - alt_offset]
@@ -28,3 +32,7 @@ if __name__=="__main__":
         J2_diff = J2_rates[1]-J2_rates[0]
         time_to_complete_raan = 2/J2_diff/(24*60*60) #days
         print(f"{alt_offset}, {time_to_complete_raan} days")
+        alt_offsets.append(alt_offset)
+        times_to_complete_raan.append(time_to_complete_raan)
+    plt.plot(alt_offsets, times_to_complete_raan)
+    plt.show()
