@@ -9,11 +9,14 @@ import math
 import numpy as np
 from astropy.time import Time
 import pandas as pd
-
 import matplotlib.pyplot as plt
-global earth_rotation_rate 
+from compute_RAAN_drift import calc_J2_rate
+
+global earth_rotation_rate, mu
 earth_rotation_rate = 7.2921150E-5 # rad/s
-def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 10, time_step = 10):
+mu = 398600.44189 #km^3/s^2
+
+def propagate_J2(data_propagate_J2_list, cat_id, use_today_date = True, days_selected = 5, time_step = 5):
     # %% User inputs
     '''
     data_propagate_J2_list:  a list of strings, specifying the requested day to display the RAAN for. 
@@ -22,16 +25,13 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 10, time_step =
     cat_id: int,  value of the NORAD CAT ID of selected satellite. NEUSAR --> 52937
     time_step: int, time step in minutes
     '''
-    use_today_date = False
     if not use_today_date: 
         past_TLE_filename = "pulled_data\\data_20221007\\221007_NEUSAR_52937.tle"
-   
     date_format = "%Y%m%d%H%M"
     # %% Section to pull TLE data from online
     # Example to use NORAD Cat ID: 
     # TLE_pull.check_tle(cat_id = 25544)
     if use_today_date:
-        
         date_format_today = "%Y%m%d"
         today = date.today()
         data_pulled_day = today.strftime(date_format_today)
@@ -49,10 +49,7 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 10, time_step =
     else:
         output_file_name = past_TLE_filename
     # %% Section to propagate to selected day from TLE pulled
-    # J2 effect constants
-    mu = 398600.44189 #km^3/s^2
-    Re = 6378 #km 
-    J2_const = 1.08262668* 10**(-3)
+    
     # Read values from TLE. 
     TLE_file = open(output_file_name, 'r')
     Lines = TLE_file.readlines()
@@ -71,11 +68,8 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 10, time_step =
     + timedelta(hours= TLE_hour) \
     + timedelta(minutes= TLE_minute)
 
-
-    mean_motion = math.sqrt(mu/(current_a**3))
-    perturbed_mean_motion = mean_motion * (1 + 3/4*J2_const * (Re/current_a)**2 * (1- current_e**2)**(-3/2)* (3*math.cos(current_i)**2-1))
     #calcuate nodal precession using perturbed mean motion value. 
-    nodal_precession_rate = -3/2 * J2_const * (Re/(current_a*(1-current_e**2)))**2 * perturbed_mean_motion * math.cos(current_i) * 180 / math.pi# deg/s
+    nodal_precession_rate = calc_J2_rate(current_a, current_i, current_e)
     overall_df = pd.DataFrame()
    
     for data_propagate_J2 in data_propagate_J2_list:
@@ -89,24 +83,24 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 10, time_step =
             TLE_minute_string = f"{0}{TLE_minute}"
         else: 
             TLE_minute_string = str(TLE_minute)
-        data_propagate_J2 = data_propagate_J2 + TLE_hour_string + TLE_minute_string 
+        data_propagate_J2 = data_propagate_J2 + '0000' #TLE_hour_string + TLE_minute_string 
         datetime_propagate_J2_start = datetime.strptime(data_propagate_J2, date_format)
         datetime_propagate_J2_end = datetime_propagate_J2_start + timedelta(days = days_selected)
 
        
-
-
-        #Propagate 10 days at 1 minute intervals, after requested epoch
+        #Propagate 10 days at x minute intervals, after requested epoch
         T_prop = t = np.arange(datetime_propagate_J2_start, datetime_propagate_J2_end, timedelta(minutes=time_step)).astype(datetime)
         propagation_durations = T_prop - datetime_TLE_epoch
         #nodal_precession_rate = 1.6229E-6
         final_RAAN_NS = np.zeros(propagation_durations.shape)
         angle_between_vernal_and_pm = np.zeros(propagation_durations.shape)
+        hpop_correction = np.zeros(propagation_durations.shape)
         for propagation_duration in enumerate(propagation_durations):
             #end_epoch = propagation_duration[1] + datetime_propagate_J2_start
-            final_RAAN_NS[propagation_duration[0]] = (current_RAAN + nodal_precession_rate*(propagation_duration[1].total_seconds()))%360
+            hpop_correction[propagation_duration[0]] = correct_J2_to_HPOP(propagation_duration[1].total_seconds()/86400)
+            
+            final_RAAN_NS[propagation_duration[0]] = (current_RAAN + nodal_precession_rate*(propagation_duration[1].total_seconds()))%360 + hpop_correction[propagation_duration[0]]
             angle_between_vernal_and_pm[propagation_duration[0]] = output_angle_between_vernal_and_pm(T_prop[propagation_duration[0]].strftime('%Y-%m-%d %H:%M:%S'))
-    
             #print(f"RAAN of cat id {cat_id} is {final_RAAN_NS[propagation_duration[0]]:.5f} deg on {T_prop[propagation_duration[0]].strftime('%d/%m/%Y, %H:%M')} UTC, {propagation_duration[1].days} days from today.")
 
 
@@ -123,28 +117,36 @@ def propagate_J2(data_propagate_J2_list, cat_id, days_selected = 10, time_step =
     #plt.show()
     return overall_df
 
+def correct_J2_to_HPOP(days):
+    '''
+    Function to correct J2 perturbation with HPOP results from STK via interpolation
+    Deviation = RAAN_HPOP- RAAN_J2
+    '''
+    df_correction = pd.read_csv("deviation_between_j2_hpop.csv")
+    return np.interp(days, df_correction["days_from_TLE_epoch"], df_correction["deviation_between_J2_and_HPOP"])
+
+
+
 def output_launch_times(overall_df, launch_site_coords, RAAN_tol):
     '''
     angle_between_vernal_and_pm tabulates the difference between vernal and prime meridian and each propagated time.
     '''
-    midnight_epochs =np.zeros(overall_df["T_prop_T2 (UTC)"].shape).astype(datetime)
-    for j in enumerate(overall_df["T_prop_T2 (UTC)"]):
-        midnight_epochs[j[0]] = datetime(j[1].year, j[1].month, j[1].day, 0, 0, 0, 0)
-
-    #GHAVE_0 = output_GHAVE_0(midnight_epochs, launch_site_coords) * 15 # Conversion of 15deg/hr angle
     long_ECI = output_long_ECI(overall_df["inc_degrees"], launch_site_coords, overall_df["angle_between_vernal_and_pm"])
-    ### TEST 
-    #Only if final_RAAN_T2 and long_ECI matches up, then the T_prop_T2 value is valid. 
+
     overall_df["long_ECI"] = long_ECI
     overall_df["del_RAAN"] = overall_df["final_RAAN_T2"] - long_ECI
 
     valid_launch_conditions = overall_df[(overall_df["del_RAAN"]< RAAN_tol) & (overall_df["del_RAAN"]>=0)]
-
-    #t = np.mod(overall_df["final_RAAN_T2"] - GHAVE_0 - long_ECI, 360)/(earth_rotation_rate * 180 / np.pi)# t represent GMT time of particular date for launch. 
-    # t refers to time in seconds, in GMT of the particular date that allows this. 
+    valid_launch_conditions.drop("inc_degrees", axis = 1)
+    valid_launch_conditions.drop("angle_between_vernal_and_pm", axis = 1)
     return valid_launch_conditions
 
 def RAAN_T2(RAAN_NS, T_prop):
+    '''
+    Function that outputs 
+    RAAN_T2--> target RAAN of T2. 
+    alter_timesteps --> list of times to launch accounting for orbit insertion duration.  
+    '''
     RAAN_T2 = (RAAN_NS - 120)%360
     altered_timesteps = T_prop - timedelta(minutes = 19)
     return RAAN_T2, altered_timesteps
@@ -160,23 +162,6 @@ def output_long_ECI(i, launch_site_coords, angle_between_vernal_and_pm):
     
     return long_ECI 
 
-
-# def output_GHAVE_0(epochs, coord):
-#     '''
-#     Params
-#         epochs: Datetime array containing all GMT midnight epochs
-#         coord: tuple containing local coordinates
-
-#     returns 
-#         GHAVE_0_array: numpy array of floats representing hourangles
-#     '''
-#     #t= np.zeros(epochs.shape).astype(datetime)
-#     GHAVE_0_array = np.zeros(epochs.shape)
-#     for epoch in enumerate(epochs):
-#         t = Time(epoch[1], scale='utc', location=coord)
-#         GHAVE_0_array[epoch[0]] = t.sidereal_time('apparent', 'greenwich').hourangle
-#     return GHAVE_0_array
-
 def output_angle_between_vernal_and_pm(time):
     '''
     This angle is formally refered to as Greenwich sidereal angle (GST), the angle between the prime meridian and the vernal equinox.
@@ -188,13 +173,7 @@ def output_angle_between_vernal_and_pm(time):
 
     time: example--> '2018-03-14 23:48:00'
 
-    outputs the angle between vernal equinox and the prime meridian, by getting angle between a vector in icrs (eci) vs itrs (ecef) frame
-    Need to convert from ECI to ECEF
-
-
     '''
-    from astropy import coordinates as coord
-    from astropy import units as u
     from astropy.time import Time
 
     t = Time(time, scale='utc')
@@ -203,17 +182,19 @@ def output_angle_between_vernal_and_pm(time):
 
     return rotation_angle
     
-
-
 if __name__=="__main__":
 
-    RAAN_tol = 4
+   
+
+    RAAN_tol = 5
     data_propagate_J2_list = ["20230319"]
     cat_id = 53297
-    overall_df = propagate_J2(data_propagate_J2_list, cat_id)
+    use_today_date = False
+    overall_df = propagate_J2(data_propagate_J2_list, cat_id, use_today_date)
 
     launch_site_coords = (13.73204, 80.23621)
     launch_azimuth = 102 #degree
     launch_data = output_launch_times(overall_df, launch_site_coords, RAAN_tol)
     overall_df.to_csv("output_data.csv")
+
     launch_data.to_csv("valid_launch_times.csv", index = False)
