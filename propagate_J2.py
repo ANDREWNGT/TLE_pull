@@ -16,7 +16,7 @@ global earth_rotation_rate, mu
 earth_rotation_rate = 7.2921150E-5 # rad/s
 mu = 398600.44189 #km^3/s^2
 
-def propagate_J2(data_propagate_J2_list, cat_id, use_today_date = True, days_selected = 5, time_step = 5):
+def propagate_J2(data_propagate_J2_list, cat_id, time_from_launch_to_descending_node, use_today_date = True, days_selected = 5, time_step = 5, ):
     # %% User inputs
     '''
     data_propagate_J2_list:  a list of strings, specifying the requested day to display the RAAN for. 
@@ -26,7 +26,7 @@ def propagate_J2(data_propagate_J2_list, cat_id, use_today_date = True, days_sel
     time_step: int, time step in minutes
     '''
     if not use_today_date: 
-        past_TLE_filename = "pulled_data\\data_20221007\\221007_NEUSAR_52937.tle"
+        past_TLE_filename = "pulled_data\\data_20230322\\230322_NEUSAR_52937.tle"
     date_format = "%Y%m%d%H%M"
     # %% Section to pull TLE data from online
     # Example to use NORAD Cat ID: 
@@ -104,7 +104,7 @@ def propagate_J2(data_propagate_J2_list, cat_id, use_today_date = True, days_sel
             #print(f"RAAN of cat id {cat_id} is {final_RAAN_NS[propagation_duration[0]]:.5f} deg on {T_prop[propagation_duration[0]].strftime('%d/%m/%Y, %H:%M')} UTC, {propagation_duration[1].days} days from today.")
 
 
-        final_RAAN_T2, T_prop_T2 = RAAN_T2(final_RAAN_NS, T_prop)
+        final_RAAN_T2, T_prop_T2 = RAAN_T2(final_RAAN_NS, T_prop, time_from_launch_to_descending_node)
         inc_degrees = current_i*180/np.pi
         print(f"Inclination of orbit is: {inc_degrees}")
 
@@ -125,31 +125,15 @@ def correct_J2_to_HPOP(days):
     df_correction = pd.read_csv("deviation_between_j2_hpop.csv")
     return np.interp(days, df_correction["days_from_TLE_epoch"], df_correction["deviation_between_J2_and_HPOP"])
 
-
-
-def output_launch_times(overall_df, launch_site_coords, RAAN_tol):
-    '''
-    angle_between_vernal_and_pm tabulates the difference between vernal and prime meridian and each propagated time.
-    '''
-    long_ECI = output_long_ECI(overall_df["inc_degrees"], launch_site_coords, overall_df["angle_between_vernal_and_pm"])
-
-    overall_df["long_ECI"] = long_ECI
-    overall_df["del_RAAN"] = overall_df["final_RAAN_T2"] - long_ECI
-
-    valid_launch_conditions = overall_df[(overall_df["del_RAAN"]< RAAN_tol) & (overall_df["del_RAAN"]>=0)]
-    valid_launch_conditions.drop("inc_degrees", axis = 1)
-    valid_launch_conditions.drop("angle_between_vernal_and_pm", axis = 1)
-    return valid_launch_conditions
-
-def RAAN_T2(RAAN_NS, T_prop):
+def RAAN_T2(RAAN_NS, T_prop, time_from_launch_to_descending_node):
     '''
     Function that outputs 
     RAAN_T2--> target RAAN of T2. 
     alter_timesteps --> list of times to launch accounting for orbit insertion duration.  
     '''
     RAAN_T2 = (RAAN_NS - 120)%360
-    altered_timesteps = T_prop - timedelta(minutes = 19)
-    return RAAN_T2, altered_timesteps
+    altered_timesteps = T_prop - timedelta(minutes = time_from_launch_to_descending_node)
+    return RAAN_T2, T_prop
 
 def output_long_ECI(i, launch_site_coords, angle_between_vernal_and_pm):
     # https://space.stackexchange.com/questions/21796/relation-between-launch-window-and-raan-and-argument-of-perigee
@@ -158,9 +142,9 @@ def output_long_ECI(i, launch_site_coords, angle_between_vernal_and_pm):
     # This function transforms the launch site longitude into its ECI counterpart which varies with time of day. 
     # Longitude of launch site in ECI frame is given as: 
     long_ECI = np.zeros(angle_between_vernal_and_pm.shape)
-    long_ECI = np.mod(-angle_between_vernal_and_pm + launch_site_coords[1] - (np.arcsin(np.tan((90-i)*np.pi/180) * np.tan(launch_site_coords[0])*np.pi/180)*180/np.pi), 360)
-    
-    return long_ECI 
+    del_lon=- (np.arcsin(np.tan((90-i)*np.pi/180) * np.tan(launch_site_coords[0])*np.pi/180)*180/np.pi)
+    long_ECI = np.mod(-angle_between_vernal_and_pm + launch_site_coords[1] + del_lon , 360)
+    return long_ECI, del_lon
 
 def output_angle_between_vernal_and_pm(time):
     '''
@@ -175,26 +159,43 @@ def output_angle_between_vernal_and_pm(time):
 
     '''
     from astropy.time import Time
-
     t = Time(time, scale='utc')
     GAST = t.sidereal_time('apparent', 'greenwich')  
     rotation_angle = GAST.value*15
 
     return rotation_angle
     
+def output_launch_times(overall_df, launch_site_coords, RAAN_tol, lon_of_descending_node):
+    '''
+    angle_between_vernal_and_pm tabulates the difference between vernal and prime meridian and each propagated time.
+    '''
+    long_ECI, del_lon = output_long_ECI(overall_df["inc_degrees"], launch_site_coords, overall_df["angle_between_vernal_and_pm"])
+    RAAN_insertion = np.mod(lon_of_descending_node + overall_df["angle_between_vernal_and_pm"]-180, 360)
+    overall_df["long_ECI"] = long_ECI
+    overall_df["del_RAAN"] = np.abs(overall_df["final_RAAN_T2"] - RAAN_insertion)
+    overall_df["del_lon"] = del_lon
+    valid_launch_conditions = overall_df[(overall_df["del_RAAN"]< RAAN_tol) & (overall_df["del_RAAN"]>=0)]
+    valid_launch_conditions.drop("inc_degrees", axis = 1)
+    valid_launch_conditions.drop("angle_between_vernal_and_pm", axis = 1)
+    return valid_launch_conditions
+
 if __name__=="__main__":
 
    
 
     RAAN_tol = 5
-    data_propagate_J2_list = ["20230319"]
+    data_propagate_J2_list = ["20230421"]
     cat_id = 53297
     use_today_date = False
-    overall_df = propagate_J2(data_propagate_J2_list, cat_id, use_today_date)
+    #lon_of_descending_node = 132.43 #From NSIL's flight trajectory, July 2022 analysis
+    lon_of_descending_node = 116.651 # From NSIL's flight trajectory, March 2023 analysis
+
+    time_from_launch_to_descending_node = 20 # From NSIL's date 
+    overall_df = propagate_J2(data_propagate_J2_list, cat_id, time_from_launch_to_descending_node, use_today_date)
 
     launch_site_coords = (13.73204, 80.23621)
     launch_azimuth = 102 #degree
-    launch_data = output_launch_times(overall_df, launch_site_coords, RAAN_tol)
+    launch_data = output_launch_times(overall_df, launch_site_coords, RAAN_tol, lon_of_descending_node)
     overall_df.to_csv("output_data.csv")
 
     launch_data.to_csv("valid_launch_times.csv", index = False)

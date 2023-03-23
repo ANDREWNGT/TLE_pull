@@ -58,3 +58,48 @@ def check_tle(cat_id= None, sat_name = None, output_folder = None):
     with open(output_file_name, 'wb') as file: 
         file.write(f._content)
     return output_file_name
+
+if __name__=="__main__":
+    NORAD_cat_id=[52935,
+                        41169,
+                        32060,
+                        35946,
+                        40115,
+                        38012,
+                        39019,
+                        48268,
+                        49070,
+                        39418,
+                        40072,
+                        41601,
+                        41771,
+                        41772,
+                        41773,
+                        41774,
+                        42987,
+                        42988,
+                        42989,
+                        42990,
+                        42991,
+                        42992,
+                        43797,
+                        43802,
+                        45788,
+                        45789,
+                        45790,
+                        46179,
+                        46180,
+                        46235,
+                        ]
+    date_format_today = "%Y%m%d"
+    today = date.today()
+    data_pulled_day = today.strftime(date_format_today)
+    parent_output_folder = os.path.join(os.getcwd(), "pulled_data")
+    if not os.path.exists(parent_output_folder):
+        os.mkdir(parent_output_folder)
+    output_folder = os.path.join(parent_output_folder, f"data_{data_pulled_day}")
+    if not os.path.exists(output_folder):
+        os.mkdir(output_folder)
+
+    for cat_id in NORAD_cat_id:
+        check_tle(cat_id = cat_id, output_folder = output_folder)
